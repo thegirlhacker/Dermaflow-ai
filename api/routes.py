@@ -1,53 +1,13 @@
 import time
 import uuid
 from fastapi import APIRouter
+from agents.orchestrator import app
+from agents.state import DermaFlowState
 from api.schemas import ChatRequest, ChatResponse, SourceChunk
 from api.session import create_session, get_session, save_session
-from rag.retriever import retrieve
 from config import config
-import google.generativeai as genai
 
 router = APIRouter()
-
-genai.configure(api_key=config.GEMINI_API_KEY)
-
-# ─────────────────────────────────────────────
-# helper — build RAG prompt
-# ─────────────────────────────────────────────
-
-def build_rag_prompt(
-    query: str,
-    chunks: list[dict],
-    history: list[dict]   # history WITHOUT current query — pass history[:-1]
-) -> str:
-
-    # include source label so LLM can cite it
-    context = "\n\n".join([
-        f"[Source: {c.get('source', 'unknown')} | Condition: {c.get('condition', 'unknown')}]\n{c['text']}"
-        for c in chunks
-    ])
-
-    # last 3 turns before current query — avoids duplication
-    history_text = ""
-    if history:
-        turns = [
-            f"{'User' if h['role'] == 'user' else 'Assistant'}: {h['content']}"
-            for h in history
-        ]
-        history_text = "\n".join(turns)
-
-    return f"""You are DermaFlow AI, a dermatology assistant.
-Answer ONLY using the medical context provided below.
-If context is insufficient, say so clearly.
-Always end with: "This is for informational purposes only and not a medical diagnosis."
-
-{f"Conversation so far:{chr(10)}{history_text}{chr(10)}" if history_text else ""}
-Medical Context:
-{context}
-
-User Question: {query}
-
-Answer:"""
 
 
 # ─────────────────────────────────────────────
@@ -69,42 +29,32 @@ async def new_chat():
 async def chat(request: ChatRequest):
     start_time = time.time()
 
-    # load session
-    session = get_session(request.session_id)
+    session_id = request.session_id or str(uuid.uuid4())
+    create_session(session_id)
+
+    initial_state: DermaFlowState = {
+        "query": request.query,
+        "condition": request.condition_hint,
+        "image_path": None,
+        "session_id": session_id,
+        "history": get_session(session_id).get("history", []),
+        "intent": None,
+        "retrieved_chunks": [],
+        "response": "",
+        "agent_used": "",
+        "confident": False,
+        "error": None
+    }
+
+    output = app.invoke(initial_state)
+    answer = output.get("response", "")
+
+    session = get_session(session_id)
     history = session.get("history", [])
-
-    # retrieve BEFORE appending current query to history
-    # so history passed to prompt is only previous turns
-    result = retrieve(
-        query=request.query,
-        condition=request.condition_hint
-    )
-
-    if not result["confident"]:
-        answer     = (
-            "I could not find enough relevant medical information for this query. "
-            "Please try rephrasing or select a specific condition."
-        )
-        agent_used = "fallback_agent"
-
-    else:
-        # pass history WITHOUT current query to avoid duplication in prompt
-        prompt = build_rag_prompt(
-            query=request.query,
-            chunks=result["chunks"],
-            history=history[-3:] if history else []
-        )
-
-        model    = genai.GenerativeModel(config.LLM_MODEL)
-        response = model.generate_content(prompt)
-        answer   = response.text
-        agent_used = "rag_agent"
-
-    # NOW append both turns to history after generation
     history.append({"role": "user",      "content": request.query})
     history.append({"role": "assistant", "content": answer})
 
-    save_session(request.session_id, {"history": history})
+    save_session(session_id, {"history": history})
 
     latency_ms = round((time.time() - start_time) * 1000, 2)
 
@@ -115,15 +65,15 @@ async def chat(request: ChatRequest):
             score     = c.get("score",     0.0),
             preview   = c.get("text",      "")[:120]
         )
-        for c in result["chunks"]
+        for c in output.get("retrieved_chunks", [])
     ]
 
     return ChatResponse(
-        session_id = request.session_id,
+        session_id = session_id,
         response   = answer,
-        agent_used = agent_used,
+        agent_used = output.get("agent_used", ""),
         sources    = sources,
-        confident  = result["confident"],
+        confident  = output.get("confident", False),
         latency_ms = latency_ms
     )
 
