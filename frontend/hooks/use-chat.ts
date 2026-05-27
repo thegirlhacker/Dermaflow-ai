@@ -1,7 +1,7 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Message, ChatSession } from "@/types/chat";
-import { createNewSession, sendChatMessage } from "@/lib/api";
+import { sendChatMessage, getSessions, getSessionHistory } from "@/lib/api";
 
 export function useChat() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -9,51 +9,78 @@ export function useChat() {
   const [messages, setMessages] = useState<Record<string, Message[]>>({});
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const fetchedRef = useRef(false);
 
-  // Initialize a new session if none exists
+  const handleNewChat = useCallback(() => {
+    const sessionId = uuidv4();
+    setCurrentSessionId(sessionId);
+    setSessions((prev) => {
+      if (prev.length > 0 && prev[0].title === "New Chat") {
+        return prev;
+      }
+      return [{ session_id: sessionId, title: "New Chat" }, ...prev];
+    });
+    setMessages((prev) => ({ ...prev, [sessionId]: [] }));
+  }, []);
+
+  // Fetch sessions on mount
   useEffect(() => {
-    if (!currentSessionId && sessions.length === 0) {
-      handleNewChat();
+    if (fetchedRef.current) return;
+    fetchedRef.current = true;
+    
+    async function loadSessions() {
+      try {
+        const loadedSessions = await getSessions();
+        if (loadedSessions.length > 0) {
+          setSessions(loadedSessions);
+          setCurrentSessionId(loadedSessions[0].session_id);
+        } else {
+          handleNewChat();
+        }
+      } catch (err) {
+        console.error("Failed to load sessions", err);
+      }
     }
-  }, [currentSessionId, sessions.length]);
+    loadSessions();
+  }, [handleNewChat]);
 
-  const handleNewChat = useCallback(async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-      const sessionId = await createNewSession();
-      setCurrentSessionId(sessionId);
-      setSessions((prev) => [{ id: sessionId, preview: "New Chat" }, ...prev]);
-      setMessages((prev) => ({ ...prev, [sessionId]: [] }));
-    } catch (err) {
-      setError("Failed to create a new session.");
-    } finally {
-      setIsLoading(false);
+  // Fetch history when currentSessionId changes
+  useEffect(() => {
+    if (currentSessionId && !messages[currentSessionId]) {
+      let mounted = true;
+      async function loadHistory() {
+        try {
+          setIsLoading(true);
+          const history = await getSessionHistory(currentSessionId as string);
+          if (mounted) {
+            setMessages((prev) => ({ ...prev, [currentSessionId as string]: history }));
+          }
+        } catch (err) {
+          console.error("Failed to load history", err);
+        } finally {
+          if (mounted) setIsLoading(false);
+        }
+      }
+      loadHistory();
+      return () => { mounted = false; };
     }
+  }, [currentSessionId, messages]);
+
+  const switchSession = useCallback((sessionId: string) => {
+    setCurrentSessionId(sessionId);
   }, []);
 
   const sendMessage = useCallback(
-    async (query: string, condition_hint: string) => {
-      if (!currentSessionId || !query.trim()) return;
+    async (query: string, condition_hint: string, image_base64?: string) => {
+      if (!currentSessionId || (!query.trim() && !image_base64)) return;
 
       const userMessageId = uuidv4();
-      const userMessage: Message = { id: userMessageId, role: "user", content: query };
+      const userMessage: Message = { id: userMessageId, role: "user", content: query, image_base64 };
 
       setMessages((prev) => ({
         ...prev,
         [currentSessionId]: [...(prev[currentSessionId] || []), userMessage],
       }));
-
-      // Update session preview if it's the first message
-      setSessions((prev) =>
-        prev.map((s) => {
-          if (s.id === currentSessionId && s.preview === "New Chat") {
-            const preview = query.split(" ").slice(0, 3).join(" ") + "...";
-            return { ...s, preview };
-          }
-          return s;
-        })
-      );
 
       setIsLoading(true);
       setError(null);
@@ -61,8 +88,9 @@ export function useChat() {
       try {
         const response = await sendChatMessage({
           session_id: currentSessionId,
-          query,
+          query: query || "Analyze this image.",
           condition_hint,
+          image_base64,
         });
 
         const assistantMessage: Message = {
@@ -76,7 +104,19 @@ export function useChat() {
           ...prev,
           [currentSessionId]: [...(prev[currentSessionId] || []), assistantMessage],
         }));
+        
+        // Refresh sessions to get the updated title
+        const updatedSessions = await getSessions();
+        setSessions((prev) => {
+          // keep the new chat if it's currently active and not in DB yet
+          const activeSession = prev.find(s => s.session_id === currentSessionId);
+          if (activeSession && activeSession.title === "New Chat" && !updatedSessions.find((s: ChatSession) => s.session_id === currentSessionId)) {
+             return [activeSession, ...updatedSessions];
+          }
+          return updatedSessions;
+        });
       } catch (err) {
+        console.error(err);
         setError("Failed to fetch response. Please try again.");
       } finally {
         setIsLoading(false);
@@ -88,7 +128,7 @@ export function useChat() {
   return {
     sessions,
     currentSessionId,
-    setCurrentSessionId,
+    setCurrentSessionId: switchSession,
     messages: currentSessionId ? messages[currentSessionId] || [] : [],
     isLoading,
     error,

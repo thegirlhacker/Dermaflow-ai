@@ -1,13 +1,16 @@
 from agents.state import DermaFlowState
 from config import config
 from rag.retriever import retrieve
+from utils.prompts import RAG_RESPONSE_PROMPT
 import google.generativeai as genai
+import logging
+import time
 
-
+logger = logging.getLogger("rag_agent")
 genai.configure(api_key=config.GEMINI_API_KEY)
 
 
-def build_rag_prompt(
+def build_rag_prompt_str(
     query: str,
     chunks: list[dict],
     history: list[dict]
@@ -20,60 +23,74 @@ def build_rag_prompt(
     history_text = ""
     if history:
         turns = [
-            f"{'User' if h['role'] == 'user' else 'Assistant'}: {h['content']}"
+            f"{'User' if h.get('role') == 'user' else 'Assistant'}: {h.get('content')}"
             for h in history
         ]
-        history_text = "\n".join(turns)
+        history_text = "Conversation so far:\n" + "\n".join(turns) + "\n"
 
-    return f"""You are DermaFlow AI, a dermatology assistant.
-Answer ONLY using the medical context provided below.
-If context is insufficient, say so clearly.
-Always end with: "This is for informational purposes only and not a medical diagnosis."
-
-{f"Conversation so far:{chr(10)}{history_text}{chr(10)}" if history_text else ""}
-Medical Context:
-{context}
-
-User Question: {query}
-
-Answer:"""
+    return RAG_RESPONSE_PROMPT.format(
+        history=history_text,
+        context=context,
+        query=query
+    )
 
 
 def rag_agent(state: DermaFlowState) -> DermaFlowState:
+    start_time = time.time()
+    logger.info("RAG agent started | session=%s", state.get("session_id"))
+    
     history = state.get("history", [])
-
+    
+    # Metadata filtering logic
+    condition = state.get("condition")
+    intent = state.get("intent")
+    
     result = retrieve(
         query=state["query"],
-        condition=state.get("condition")
+        condition=condition,
+        intent=intent
     )
 
     if not result["confident"]:
+        latency = (time.time() - start_time) * 1000
+        logger.info("RAG retrieval low confidence, routing to fallback | latency=%.2fms", latency)
         return {
             **state,
-            "response": (
-                "I could not find enough relevant medical information for this query. "
-                "Please try rephrasing or select a specific condition."
-            ),
             "retrieved_chunks": result["chunks"],
-            "agent_used": "fallback_agent",
+            "agent_used": "rag_agent", # Actually, should this be set later? The orchestrator routes to websearch_agent if confident=False
             "confident": False,
-            "error": None
+            "latency_ms": latency
         }
 
-    prompt = build_rag_prompt(
+    prompt = build_rag_prompt_str(
         query=state["query"],
         chunks=result["chunks"],
         history=history[-3:] if history else []
     )
 
     model = genai.GenerativeModel(config.LLM_MODEL)
-    response = model.generate_content(prompt)
+    try:
+        response = model.generate_content(prompt)
+        response_text = response.text
+    except Exception as e:
+        logger.error("RAG Gemini generation failed: %s", e)
+        error_msg = str(e).lower()
+        if "429" in error_msg or "quota" in error_msg:
+            response_text = "Sorry, I hit a rate limit with the AI provider. Please wait a few seconds and try again."
+        elif "block" in error_msg or "safety" in error_msg:
+            response_text = "Sorry, the response was blocked by the safety filters."
+        else:
+            response_text = "Sorry, I encountered an error while generating the response."
+        
+    latency = (time.time() - start_time) * 1000
+    logger.info("RAG agent complete | confident=True | latency=%.2fms", latency)
 
     return {
         **state,
-        "response": response.text,
+        "response": response_text,
         "retrieved_chunks": result["chunks"],
         "agent_used": "rag_agent",
         "confident": True,
+        "latency_ms": latency,
         "error": None
     }

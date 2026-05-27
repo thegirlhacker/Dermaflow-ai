@@ -1,25 +1,17 @@
-from typing import Any, Optional, TypedDict
+from typing import TypedDict, Optional, List, Dict, Any
 
-#So state contains: all important variables that may be needed between nodes
 class DermaFlowState(TypedDict):
-
-    # ── user input ─────────────────────
     query: str
     condition: Optional[str]
     image_path: Optional[str]
     session_id: str
-
-    # ── conversation history ───────────
-    history: list[dict[str, Any]]
-
-    # ── routing ────────────────────────
+    history: List[Dict[str, str]]
     intent: Optional[str]
-
-    # ── agent outputs ──────────────────
-    retrieved_chunks: list[dict[str, Any]]
+    retrieved_chunks: List[Dict[str, Any]]
     response: str
-
-    # ── metadata ───────────────────────
     agent_used: str
     confident: bool
+    latency_ms: float
+    vision_features: Optional[Dict[str, Any]]
+    vision_condition_scores: Optional[Dict[str, float]]
     error: Optional[str]

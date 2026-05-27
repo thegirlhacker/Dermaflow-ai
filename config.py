@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
+load_dotenv(override=True)
 
 class Config:
 
@@ -52,6 +52,7 @@ class Config:
     INGREDIENTS_FILE = "data/raw/ingredients.json"
 
     SESSIONS_DIR = "memory/sessions"
+    UPLOAD_DIR = "data/uploads"
 
 
 config = Config()

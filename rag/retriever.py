@@ -19,7 +19,8 @@ def retrieve(
     query: str,
     condition: str = None,
     top_k: int = None,
-    threshold: float = None
+    threshold: float = None,
+    intent: str = None
 ) -> dict:
     """
     Core retrieval function.
@@ -29,6 +30,7 @@ def retrieve(
         condition: optional filter — "acne", "eczema", "ingredient", etc.
         top_k:     how many results to fetch (defaults to config)
         threshold: minimum confidence score (defaults to config)
+        intent:    detected intent ("ingredient", "condition_info", etc.)
 
     Returns:
         {
@@ -45,10 +47,19 @@ def retrieve(
 
     query_vector = embed_query(query)
 
-    # build filter only if condition is specified and meaningful
-    filter_dict = None
-    if condition and condition not in ("general", "unknown", "none"):
-        filter_dict = {"condition": {"$eq": condition}}
+    # build filter
+    filter_dict = {}
+    
+    # If intent is ingredient, strictly filter for ingredient type chunks
+    if intent == "ingredient":
+        filter_dict["type"] = {"$eq": "ingredient"}
+    # Otherwise if a specific condition is provided, filter for it
+    elif condition and condition not in ("general", "unknown", "none"):
+        filter_dict["condition"] = {"$eq": condition}
+
+    # If filter_dict is empty, set it to None for Pinecone
+    if not filter_dict:
+        filter_dict = None
 
     results = index.query(
         vector=query_vector,
@@ -90,31 +101,3 @@ def retrieve(
         "latency_ms": latency_ms
     }
 
-def retrieve_multi_condition(query: str, conditions: list[str]) -> dict:
-    """
-    Retrieve across multiple conditions and merge results.
-    Useful when triage agent isn't sure which condition applies.
-
-    Example: query about 'red itchy skin' might be eczema OR contact dermatitis
-    """
-    all_chunks = []
-    for condition in conditions:
-        result = retrieve(query, condition=condition)
-        all_chunks.extend(result["chunks"])
-
-    # deduplicate by text and re-sort by score
-    seen = set()
-    unique_chunks = []
-    for chunk in sorted(all_chunks, key=lambda x: x["score"], reverse=True):
-        if chunk["text"] not in seen:
-            seen.add(chunk["text"])
-            unique_chunks.append(chunk)
-
-    return {
-        "chunks":    unique_chunks[:config.TOP_K_RETRIEVE],
-        "confident": len(unique_chunks) > 0,
-        "query":     query,
-        "filter":    conditions,
-        "latency_ms": 0
-    }
-        

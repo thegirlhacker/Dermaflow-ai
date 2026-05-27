@@ -1,11 +1,19 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
+import rehypeRaw from "rehype-raw";
 import { Message } from "@/types/chat";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { User, Bot, FileText, ChevronDown } from "lucide-react";
+
+const SKIN_FACTS = [
+  "Fun fact: Your skin is your body's largest organ.",
+  "Fun fact: You shed about 30,000 to 40,000 skin cells every minute.",
+  "Fun fact: Your skin renews itself completely every 28 days.",
+  "Fun fact: Melanin gives skin its color and protects against UV rays.",
+  "Fun fact: The thickest skin is on your feet, the thinnest on your eyelids."
+];
 
 interface ChatAreaProps {
   messages: Message[];
@@ -14,6 +22,7 @@ interface ChatAreaProps {
 
 export function ChatArea({ messages, isLoading }: ChatAreaProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [factIndex, setFactIndex] = useState(0);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -21,11 +30,22 @@ export function ChatArea({ messages, isLoading }: ChatAreaProps) {
     }
   }, [messages, isLoading]);
 
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (isLoading) {
+      setFactIndex(Math.floor(Math.random() * SKIN_FACTS.length));
+      interval = setInterval(() => {
+        setFactIndex((prev) => (prev + 1) % SKIN_FACTS.length);
+      }, 3500);
+    }
+    return () => clearInterval(interval);
+  }, [isLoading]);
+
   return (
-    <ScrollArea className="flex-1 w-full bg-background relative">
-      <div className="w-full max-w-3xl mx-auto py-8 px-4 flex flex-col gap-6">
+    <div className="flex-1 w-full overflow-y-auto bg-background scroll-smooth">
+      <div className="w-full max-w-3xl mx-auto py-8 px-4 flex flex-col gap-6 min-h-full">
         {messages.length === 0 && (
-          <div className="h-full flex flex-col items-center justify-center text-center mt-32 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-1000">
+          <div className="flex-1 flex flex-col items-center justify-center text-center mt-32 gap-6 animate-in fade-in slide-in-from-bottom-4 duration-1000">
             <div className="p-4 bg-primary/10 rounded-full shadow-inner border border-primary/20">
                <Bot className="w-12 h-12 text-primary" />
             </div>
@@ -51,7 +71,7 @@ export function ChatArea({ messages, isLoading }: ChatAreaProps) {
               </div>
               
               <div className="prose prose-sm md:prose-base prose-invert max-w-none text-foreground/90 leading-relaxed">
-                <ReactMarkdown>{msg.content}</ReactMarkdown>
+                <ReactMarkdown rehypePlugins={[rehypeRaw]}>{msg.content}</ReactMarkdown>
               </div>
 
               {msg.sources && msg.sources.length > 0 && (
@@ -74,7 +94,7 @@ export function ChatArea({ messages, isLoading }: ChatAreaProps) {
                           <span className="text-xs text-primary font-medium ml-auto">{(src.score * 100).toFixed(1)}% Match</span>
                         </CardHeader>
                         <CardContent className="p-4 text-sm text-muted-foreground italic leading-relaxed">
-                          "{src.preview}..."
+                          &quot;{src.preview}...&quot;
                         </CardContent>
                       </Card>
                     ))}
@@ -90,18 +110,23 @@ export function ChatArea({ messages, isLoading }: ChatAreaProps) {
              <Avatar className="w-8 h-8 shrink-0 shadow-sm border border-border">
                 <AvatarFallback className="bg-primary text-primary-foreground"><Bot className="w-4 h-4" /></AvatarFallback>
             </Avatar>
-            <div className="flex flex-col gap-2 mt-1">
+            <div className="flex flex-col gap-2 mt-1 w-full">
               <div className="font-semibold text-sm text-foreground">DermaFlow AI</div>
-              <div className="flex items-center gap-1.5 mt-2 h-6">
-                <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.3s]"></div>
-                <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.15s]"></div>
-                <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce"></div>
+              <div className="flex items-center gap-3 mt-2">
+                <div className="flex items-center gap-1.5 h-6">
+                  <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.3s]"></div>
+                  <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce [animation-delay:-0.15s]"></div>
+                  <div className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce"></div>
+                </div>
+                <span key={factIndex} className="text-sm text-muted-foreground italic animate-in fade-in slide-in-from-right-4 duration-500">
+                  {SKIN_FACTS[factIndex]}
+                </span>
               </div>
             </div>
           </div>
         )}
         <div ref={scrollRef} className="h-4" />
       </div>
-    </ScrollArea>
+    </div>
   );
 }

@@ -8,6 +8,7 @@ class ChatRequest(BaseModel):
     query: str = Field(..., min_length=1, max_length=1000)
     session_id: Optional[str] = Field(None, description="Pass existing session_id to continue conversation")
     condition_hint: Optional[str] = Field(None, description="Optional condition hint from frontend")
+    image_base64: Optional[str] = Field(None, description="Optional base64 encoded image for vision agent")
 
 #class ImageAnalysisRequest(BaseModel):
     #session_id: Optional[str] = None

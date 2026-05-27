@@ -18,6 +18,7 @@ export interface ChatRequest {
   session_id: string;
   query: string;
   condition_hint: string | null;
+  image_base64?: string;
 }
 
 export interface Message {
@@ -25,9 +26,11 @@ export interface Message {
   role: "user" | "assistant";
   content: string;
   sources?: SourceChunk[];
+  image_base64?: string;
 }
 
 export interface ChatSession {
-  id: string;
-  preview: string; // first 2-3 words of first user query
+  session_id: string;
+  title: string;
+  updated_at?: string;
 }

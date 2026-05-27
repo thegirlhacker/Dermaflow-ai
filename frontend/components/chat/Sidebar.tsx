@@ -28,16 +28,16 @@ export function Sidebar({ sessions, currentSessionId, onSelectSession, onNewChat
         <div className="space-y-1 pb-4">
           {sessions.map((session) => (
             <button
-              key={session.id}
-              onClick={() => onSelectSession(session.id)}
+              key={session.session_id}
+              onClick={() => onSelectSession(session.session_id)}
               className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-sm text-left transition-all duration-200 ${
-                currentSessionId === session.id
+                currentSessionId === session.session_id
                   ? "bg-accent text-accent-foreground font-medium shadow-sm"
                   : "text-muted-foreground hover:bg-muted/80 hover:text-foreground"
               }`}
             >
-              <MessageSquare className={`w-4 h-4 shrink-0 ${currentSessionId === session.id ? 'text-primary' : 'text-muted-foreground'}`} />
-              <span className="truncate">{session.preview}</span>
+              <MessageSquare className={`w-4 h-4 shrink-0 ${currentSessionId === session.session_id ? 'text-primary' : 'text-muted-foreground'}`} />
+              <span className="truncate">{session.title || "Previous Chat"}</span>
             </button>
           ))}
         </div>
