@@ -32,6 +32,12 @@ def route_from_triage(state: DermaFlowState) -> str:
     return "rag_agent"
 
 
+def route_from_rag(state: DermaFlowState) -> str:
+    if state.get("confident", False):
+        return "end"
+    return "websearch_agent"
+
+
 workflow = StateGraph(DermaFlowState)
 
 # nodes
@@ -55,7 +61,14 @@ workflow.add_conditional_edges(
 )
 
 # endings
-workflow.add_edge("rag_agent", END)
+workflow.add_conditional_edges(
+    "rag_agent",
+    route_from_rag,
+    {
+        "end": END,
+        "websearch_agent": "websearch_agent"
+    }
+)
 workflow.add_edge("websearch_agent", END)
 workflow.add_edge("vision_agent", END)
 

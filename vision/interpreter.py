@@ -8,13 +8,14 @@ def interpret_scores(condition_scores: dict) -> dict:
     Pick the best matching condition
     and decide whether confidence is good enough.
     """
-
     # no matches found
     if not condition_scores:
         return {
             "condition": None,
             "confidence": 0.0,
             "confident": False,
+            "tier": 3,
+            "conclusion": "unknown",
             "message": "No matching condition found."
         }
 
@@ -32,13 +33,23 @@ def interpret_scores(condition_scores: dict) -> dict:
         best_score
     )
 
-    # confidence threshold
-    confident = best_score >= 0.6
+    # confidence and tier threshold
+    if best_score >= 0.75:
+        tier = 1
+        confident = True
+    elif best_score >= 0.4:
+        tier = 2
+        confident = False
+    else:
+        tier = 3
+        confident = False
 
     return {
         "condition": best_condition,
         "confidence": round(best_score, 2),
         "confident": confident,
+        "tier": tier,
+        "conclusion": best_condition,
         "message": (
             f"Visual features may match "
             f"{best_condition.replace('_', ' ')}."
@@ -48,19 +59,27 @@ def interpret_scores(condition_scores: dict) -> dict:
 
 def filter_relevant_chunks(
     chunks: list[dict],
-    condition: str
+    condition: any
 ) -> list[dict]:
     """
-    Keep only chunks related
-    to predicted condition.
+    Keep only chunks related to predicted condition.
+    Supports both a condition string or an interpretation dictionary.
     """
-
     if not condition:
+        return []
+
+    # Defensively extract the condition string if a dictionary is passed
+    if isinstance(condition, dict):
+        condition_str = condition.get("condition")
+    else:
+        condition_str = condition
+
+    if not condition_str:
         return []
 
     filtered = [
         chunk for chunk in chunks
-        if chunk.get("condition") == condition
+        if chunk.get("condition") == condition_str
     ]
 
     # fallback if nothing matched

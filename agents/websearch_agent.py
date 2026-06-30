@@ -23,129 +23,116 @@ tavily = TavilyClient(
 )
 
 
-def websearch_agent(
-    state: DermaFlowState
-) -> DermaFlowState:
+class WebSearchAgent:
+    def __init__(self, model: genai.GenerativeModel, tavily_client: TavilyClient):
+        self.model = model
+        self.tavily_client = tavily_client
 
-    start = time.time()
-
-    logger.info(
-        "Websearch started | session=%s query='%s'",
-        state["session_id"],
-        state["query"]
-    )
-
-    try:
-
-        # optional vision fallback features
-        vision_features = state.get(
-            "vision_features"
-        )
-
-        # build optimized dermatology query
-        search_query = build_search_query(
-            query=state["query"],
-            features=vision_features
-        )
+    def __call__(self, state: DermaFlowState) -> DermaFlowState:
+        start = time.time()
 
         logger.info(
-            "Search query built | '%s' | session=%s",
-            search_query,
-            state["session_id"]
+            "Websearch started | session=%s query='%s'",
+            state["session_id"],
+            state["query"]
         )
 
-        # ── Tavily Search ───────────────────
-        tavily_response = tavily.search(
-            query=search_query,
-            max_results=4,
-            search_depth="basic"
-        )
+        try:
+            # optional vision fallback features
+            vision_features = state.get("vision_features")
 
-        results = tavily_response.get(
-            "results",
-            []
-        )
+            # build optimized dermatology query
+            search_query = build_search_query(
+                query=state["query"],
+                features=vision_features
+            )
 
-        logger.info(
-            "Tavily returned %d results | session=%s",
-            len(results),
-            state["session_id"]
-        )
+            logger.info(
+                "Search query built | '%s' | session=%s",
+                search_query,
+                state["session_id"]
+            )
 
-        # no results found
-        if not results:
+            # ── Tavily Search ───────────────────
+            tavily_response = self.tavily_client.search(
+                query=search_query,
+                max_results=4,
+                search_depth="basic"
+            )
+
+            results = tavily_response.get("results", [])
+
+            logger.info(
+                "Tavily returned %d results | session=%s",
+                len(results),
+                state["session_id"]
+            )
+
+            # no results found
+            if not results:
+                return {
+                    **state,
+                    "response": (
+                        "I could not find reliable dermatology "
+                        "information for this query."
+                    ),
+                    "retrieved_chunks": [],
+                    "agent_used": "websearch_agent",
+                    "confident": False,
+                    "error": "no_results"
+                }
+
+            # ── format retrieved results ───────
+            formatted_results = format_results(results)
+
+            # ── build LLM prompt ───────────────
+            prompt = WEBSEARCH_RESPONSE_PROMPT.format(
+                query=state["query"],
+                results=formatted_results
+            )
+
+            # ── Gemini summarization ───────────
+            llm_response = self.model.generate_content(prompt)
+            answer = llm_response.text
+
+            latency = round((time.time() - start) * 1000, 2)
+
+            logger.info(
+                "Websearch complete | latency=%sms | session=%s",
+                latency,
+                state["session_id"]
+            )
+
+            return {
+                **state,
+                "response": answer,
+                "retrieved_chunks": [],
+                "agent_used": "websearch_agent",
+                "confident": True,
+                "latency_ms": latency,
+                "error": None
+            }
+
+        except Exception as e:
+            logger.error(
+                "Websearch failed | error=%s | session=%s",
+                str(e),
+                state["session_id"]
+            )
 
             return {
                 **state,
                 "response": (
-                    "I could not find reliable dermatology "
-                    "information for this query."
+                    "Web search is currently unavailable. "
+                    "Please try again later."
                 ),
                 "retrieved_chunks": [],
                 "agent_used": "websearch_agent",
                 "confident": False,
-                "error": "no_results"
+                "error": str(e)
             }
 
-        # ── format retrieved results ───────
-        formatted_results = format_results(
-            results
-        )
-
-        # ── build LLM prompt ───────────────
-        prompt = WEBSEARCH_RESPONSE_PROMPT.format(
-            query=state["query"],
-            results=formatted_results
-        )
-
-        # ── Gemini summarization ───────────
-        model = genai.GenerativeModel(
-            config.LLM_MODEL
-        )
-
-        llm_response = model.generate_content(
-            prompt
-        )
-
-        answer = llm_response.text
-
-        latency = round(
-            (time.time() - start) * 1000,
-            2
-        )
-
-        logger.info(
-            "Websearch complete | latency=%sms | session=%s",
-            latency,
-            state["session_id"]
-        )
-
-        return {
-            **state,
-            "response": answer,
-            "retrieved_chunks": [],
-            "agent_used": "websearch_agent",
-            "confident": True,
-            "latency_ms": latency,
-            "error": None
-        }
-
-    except Exception as e:
-
-        logger.error(
-            "Websearch failed | error=%s | session=%s",
-            str(e),
-            state["session_id"]
-        )
-
-        return {
-            **state,
-            "response": (
-                "Web search is currently unavailable. "
-                "Please try again later."
-            ),
-            "retrieved_chunks": [],
-            "agent_used": "websearch_agent",
-            "confident": False,
-            "error": str(e)
-        }
+# Instantiate with dependencies injected
+_model = genai.GenerativeModel(config.LLM_MODEL)
+_tavily = TavilyClient(api_key=config.TAVILY_API_KEY)
+websearch_agent = WebSearchAgent(model=_model, tavily_client=_tavily)

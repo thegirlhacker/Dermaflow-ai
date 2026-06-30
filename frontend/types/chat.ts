@@ -33,4 +33,5 @@ export interface ChatSession {
   session_id: string;
   title: string;
   updated_at?: string;
+  preview?: string;
 }

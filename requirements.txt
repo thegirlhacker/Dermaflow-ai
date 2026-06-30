@@ -1,6 +1,6 @@
 # Core
 fastapi==0.136.0
-uvicorn[standard]==0.47.0
+uvicorn[standard]==0.29.0
 python-dotenv==1.0.1
 pydantic==2.13.4
 

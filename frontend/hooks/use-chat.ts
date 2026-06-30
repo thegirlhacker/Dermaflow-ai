@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { v4 as uuidv4 } from "uuid";
 import { Message, ChatSession } from "@/types/chat";
-import { sendChatMessage, getSessions, getSessionHistory } from "@/lib/api";
+import { sendChatMessage, getSessions, getSessionHistory, generateSessionTitle } from "@/lib/api";
 
 export function useChat() {
   const [sessions, setSessions] = useState<ChatSession[]>([]);
@@ -85,6 +85,23 @@ export function useChat() {
       setIsLoading(true);
       setError(null);
 
+      // Trigger parallel title generation if this is a new chat
+      const activeSession = sessions.find((s) => s.session_id === currentSessionId);
+      const isNewSession = activeSession && activeSession.title === "New Chat";
+      if (isNewSession) {
+        generateSessionTitle(currentSessionId, query || "Analyze image")
+          .then((title) => {
+            setSessions((prev) =>
+              prev.map((s) =>
+                s.session_id === currentSessionId ? { ...s, title } : s
+              )
+            );
+          })
+          .catch((err) => {
+            console.error("Parallel title generation error:", err);
+          });
+      }
+
       try {
         const response = await sendChatMessage({
           session_id: currentSessionId,
@@ -122,7 +139,7 @@ export function useChat() {
         setIsLoading(false);
       }
     },
-    [currentSessionId]
+    [currentSessionId, sessions]
   );
 
   return {

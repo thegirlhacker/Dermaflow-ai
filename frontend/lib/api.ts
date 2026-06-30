@@ -54,3 +54,14 @@ export async function checkHealth(): Promise<boolean> {
     return false;
   }
 }
+
+export async function generateSessionTitle(sessionId: string, query: string): Promise<string> {
+  const res = await fetch(`${API_BASE_URL}/sessions/${sessionId}/generate-title`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query }),
+  });
+  if (!res.ok) throw new Error("Failed to generate title");
+  const data = await res.json();
+  return data.title;
+}

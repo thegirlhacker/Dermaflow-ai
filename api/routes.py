@@ -59,9 +59,10 @@ def generate_chat_title(query: str) -> str:
         for _ in range(3):
             try:
                 response = model.generate_content(prompt)
-                return response.text.strip().replace('"', '')
+                #return response.text.strip().replace('"', '')
+                return response.text.strip().split("\n")[0].replace('"', '')  # Take only the first line in case of multi-line response
             except Exception:
-                time.sleep(2)
+                time.sleep(2)# because of rate limits, retry a few times
         return "New Chat" # Fallback if all 3 attempts fail
     except Exception as e:
         print(f"Error generating title: {e}")
@@ -69,9 +70,19 @@ def generate_chat_title(query: str) -> str:
 
 import asyncio
 
-def _background_generate_title(session_id: str, query: str, history: list):
+class TitleRequest(BaseModel):
+    query: str
+
+@router.post("/sessions/{session_id}/generate-title")
+async def generate_and_save_title(session_id: str, request: TitleRequest):
+    create_session(session_id)
+    title = generate_chat_title(request.query)
+    save_session(session_id, {"title": title})
+    return {"title": title}
+
+def _background_generate_title(session_id: str, query: str):
     title = generate_chat_title(query)
-    save_session(session_id, {"title": title, "history": history})
+    save_session(session_id, {"title": title})
 
 # ─────────────────────────────────────────────
 # main chat endpoint
@@ -102,13 +113,12 @@ async def chat(request: ChatRequest):
         except Exception as e:
             print(f"Error decoding base64 image: {e}")
 
-    session = get_session(session_id)
+    session = get_session(session_id) #we are doing this to get the history, but we will save it later after the response is generated
     history = session.get("history", [])
 
     if len(history) == 0:
-        # User requested comment: We put title generation in the background so it doesn't block the main thread and helps prevent rate-limit bursts.
-        # This was implemented in api/routes.py
-        asyncio.create_task(asyncio.to_thread(_background_generate_title, session_id, request.query, history))
+        # We put title generation in the background but don't pass history to avoid race condition overwrite
+        asyncio.create_task(asyncio.to_thread(_background_generate_title, session_id, request.query))
 
     initial_state: DermaFlowState = {
 

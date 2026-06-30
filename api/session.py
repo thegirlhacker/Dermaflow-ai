@@ -1,5 +1,3 @@
-
-
 from pymongo import MongoClient
 import datetime
 from config import config
@@ -40,7 +38,7 @@ def save_session(session_id: str, data: dict):
 def list_sessions() -> list:
     sessions = _col.find(
         {"history.0": {"$exists": True}},
-        {"_id": 0, "session_id": 1, "title": 1, "updated_at": 1}
+        {"_id": 0, "session_id": 1, "title": 1, "updated_at": 1, "history": {"$slice": 1}}
     ).sort("updated_at", -1)
     
     # Ensure backward compatibility for older sessions without a title
@@ -48,6 +46,16 @@ def list_sessions() -> list:
     for s in sessions:
         if "title" not in s:
             s["title"] = "Previous Chat"
+            
+        # Add preview subtitle from first message
+        preview = ""
+        if "history" in s and len(s["history"]) > 0:
+            preview = s["history"][0].get("content", "")
+            if len(preview) > 40:
+                preview = preview[:40] + "..."
+        s["preview"] = preview
+        s.pop("history", None) # keep response clean
+        
         result.append(s)
         
     return result

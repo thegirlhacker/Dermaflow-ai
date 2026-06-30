@@ -5,6 +5,11 @@ from config import config
 
 genai.configure(api_key=config.GEMINI_API_KEY)
 
+INTENT_THRESHOLDS = {
+    "ingredient": 0.60,      # Strict threshold for ingredient interactions safety
+    "condition_info": 0.45,  # Moderate threshold for general symptoms facts
+}
+
 def embed_query(query: str) -> list[float]:
     """Embed a single query string."""
     response = genai.embed_content(
@@ -41,7 +46,10 @@ def retrieve(
         }
     """
     top_k     = top_k     or config.TOP_K_RETRIEVE
-    threshold = threshold or config.CONFIDENCE_THRESHOLD
+    
+    # Determine confidence threshold dynamically based on intent safety constraints
+    intent_threshold = INTENT_THRESHOLDS.get(intent, config.CONFIDENCE_THRESHOLD)
+    threshold = threshold or intent_threshold
 
     start_time = time.time()
 
