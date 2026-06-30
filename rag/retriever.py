@@ -2,6 +2,7 @@ import time
 import google.generativeai as genai
 from rag.vectordb import index
 from config import config
+from rag.reranker import rerank_chunks
 
 genai.configure(api_key=config.GEMINI_API_KEY)
 
@@ -69,15 +70,16 @@ def retrieve(
     if not filter_dict:
         filter_dict = None
 
+    # Retrieve a larger set of candidates for reranking (e.g. 3x top_k)
+    candidate_k = max(top_k * 3, 12)
     results = index.query(
         vector=query_vector,
-        top_k=top_k,
+        top_k=candidate_k,
         filter=filter_dict,
         include_metadata=True
     )
 
     latency_ms = round((time.time() - start_time) * 1000, 2)
-
     matches = results.get("matches", [])
 
     if not matches:
@@ -89,17 +91,25 @@ def retrieve(
             "latency_ms": latency_ms
         }
 
-    # filter by confidence threshold
-    confident_chunks = []
-    for m in matches:
-        if m["score"] >= threshold:
-            confident_chunks.append({
-                "text":      m["metadata"].get("text", ""),
-                "condition": m["metadata"].get("condition", "unknown"),
-                "source":    m["metadata"].get("source", "unknown"),
-                "score":     round(m["score"], 3),
-                "chunk_index": m["metadata"].get("chunk_index", -1)
-            })
+    # Convert Pinecone matches to flat dicts for the reranker
+    raw_chunks = [
+        {
+            "text":      m["metadata"].get("text", ""),
+            "condition": m["metadata"].get("condition", "unknown"),
+            "source":    m["metadata"].get("source", "unknown"),
+            "score":     m["score"],
+            "chunk_index": m["metadata"].get("chunk_index", -1)
+        }
+        for m in matches
+    ]
+
+    # Rerank and select the top_k most relevant chunks
+    reranked_chunks = rerank_chunks(query, raw_chunks, top_n=top_k)
+
+    # Filter the reranked chunks by the confidence threshold
+    confident_chunks = [
+        rc for rc in reranked_chunks if rc["score"] >= threshold
+    ]
 
     return {
         "chunks":     confident_chunks,
